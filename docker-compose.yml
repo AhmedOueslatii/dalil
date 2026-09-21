@@ -1,0 +1,26 @@
+# pgvector/pgvector:pg16 = PostgreSQL 16 avec l'extension vector préinstallée,
+# ce qui évite de la compiler nous-mêmes.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: dalil
+      POSTGRES_USER: dalil
+      POSTGRES_PASSWORD: dalil
+    ports:
+      # Port hôte 5433 pour ne pas entrer en conflit avec un PostgreSQL local
+      # qui écouterait déjà sur le port par défaut 5432.
+      - "5433:5432"
+    volumes:
+      # Volume nommé pour que les données survivent aux redémarrages du conteneur.
+      - dalil_pgdata:/var/lib/postgresql/data
+      # Scripts exécutés automatiquement à la création de la base (une seule fois).
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dalil -d dalil"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  dalil_pgdata:

@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+data/
+*.pyc
+.pytest_cache/
+.claude/
+*.log
+eval_output.txt
+*.pdf
