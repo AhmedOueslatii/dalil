@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     # `os.getenv` éparpillés dans le code et les erreurs silencieuses de typo.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    # DATABASE_URL pointe vers le Postgres local (Docker) en dev, et sera remplacé par
+    # SUPABASE_DATABASE_URL (pooler Supabase, IPv4) en production sur Render.
     DATABASE_URL: str
+    SUPABASE_DATABASE_URL: str | None = None
     EMBEDDING_DIM: int = 768
     APP_ENV: str = "dev"
     GEMINI_API_KEY: str
