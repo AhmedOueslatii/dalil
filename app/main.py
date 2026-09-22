@@ -22,12 +22,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Dalil", lifespan=lifespan)
 
-# Le frontend tourne sur un serveur séparé (fichier statique ouvert directement ou
-# petit serveur de dev) : origine différente de l'API, donc CORS doit être autorisé
-# explicitement sinon le navigateur bloque les requêtes fetch().
+# Le frontend tourne sur un serveur séparé (Vercel) : origine différente de l'API,
+# donc CORS doit être autorisé explicitement sinon le navigateur bloque fetch().
+# allow_origin_regex couvre le domaine stable (dalil-silk.vercel.app) et les URLs de
+# déploiement générées à chaque push (dalil-<hash>-ahmedoueslatiis-projects.vercel.app),
+# en plus du dev local.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # étape locale/dev uniquement ; à restreindre en production
+    allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"https://dalil.*-ahmedoueslatiis-projects\.vercel\.app|https://dalil-silk\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
