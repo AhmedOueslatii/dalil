@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app import db
-from app.auth import get_current_user_id
+from app.auth import get_current_admin_id, get_current_user_id
 from app.db import close_pool, open_pool, ping
 from app.generate import generate_answer, log_question
 
@@ -79,3 +79,66 @@ def list_questions(limit: int = 20, user_id: str = Depends(get_current_user_id))
                 (user_id, limit),
             )
             return cur.fetchall()
+
+
+# Pricing public gemini-flash-lite-latest (USD par million de tokens), à ajuster si
+# Google change ses tarifs. Ne couvre QUE les tokens de génération : l'appel
+# d'embedding fait dans hybrid_search() pour chaque question n'est pas loggé en base
+# séparément, donc le coût réel total est légèrement sous-estimé ici.
+PRICE_PER_MILLION_TOKENS_IN = 0.10
+PRICE_PER_MILLION_TOKENS_OUT = 0.40
+
+
+def estimate_cost_usd(tokens_in: int, tokens_out: int) -> float:
+    return (
+        tokens_in / 1_000_000 * PRICE_PER_MILLION_TOKENS_IN
+        + tokens_out / 1_000_000 * PRICE_PER_MILLION_TOKENS_OUT
+    )
+
+
+@app.get("/admin/dashboard")
+def admin_dashboard(_admin_id: str = Depends(get_current_admin_id)):
+    # Vue globale tous utilisateurs confondus : réservée aux admins (get_current_admin_id
+    # lève 403 sinon), contrairement à /questions qui reste isolé par utilisateur.
+    with db.pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    count(*) AS total_questions,
+                    coalesce(sum(tokens_in), 0) AS total_tokens_in,
+                    coalesce(sum(tokens_out), 0) AS total_tokens_out,
+                    coalesce(avg(latence_ms), 0) AS avg_latence_ms
+                FROM questions
+                """
+            )
+            totals = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT
+                    date_trunc('day', created_at)::date AS day,
+                    count(*) AS questions,
+                    coalesce(sum(tokens_in), 0) AS tokens_in,
+                    coalesce(sum(tokens_out), 0) AS tokens_out
+                FROM questions
+                WHERE created_at >= now() - interval '30 days'
+                GROUP BY day
+                ORDER BY day
+                """
+            )
+            by_day = cur.fetchall()
+
+    totals["estimated_cost_usd"] = round(
+        estimate_cost_usd(totals["total_tokens_in"], totals["total_tokens_out"]), 4
+    )
+    for day in by_day:
+        day["estimated_cost_usd"] = round(
+            estimate_cost_usd(day["tokens_in"], day["tokens_out"]), 4
+        )
+
+    return {
+        "totals": totals,
+        "by_day": by_day,
+        "note": "Estimation basée uniquement sur les tokens de génération ; les tokens d'embedding ne sont pas comptabilisés.",
+    }

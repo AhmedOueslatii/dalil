@@ -53,3 +53,36 @@ export async function fetchHistory(accessToken: string, limit = 10): Promise<His
   }
   return response.json();
 }
+
+export type DashboardTotals = {
+  total_questions: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  avg_latence_ms: number;
+  estimated_cost_usd: number;
+};
+
+export type DashboardDay = {
+  day: string;
+  questions: number;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost_usd: number;
+};
+
+export type DashboardData = {
+  totals: DashboardTotals;
+  by_day: DashboardDay[];
+  note: string;
+};
+
+// 403 si le compte connecté n'a pas le rôle admin (voir app/auth.py get_current_admin_id).
+export async function fetchDashboard(accessToken: string): Promise<DashboardData> {
+  const response = await fetch(`${API_BASE}/admin/dashboard`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Erreur serveur (${response.status})`);
+  }
+  return response.json();
+}
