@@ -11,6 +11,7 @@ from google.genai import types
 
 from app import db
 from app.anonymize import anonymize
+from app.guardrails import validate_answer
 from app.retry import call_with_retry
 from app.search import hybrid_search
 from app.settings import get_settings
@@ -33,7 +34,9 @@ Règles strictes :
    au format [Art. X] reprenant exactement le numéro d'article du passage utilisé.
 3. Si les passages fournis ne permettent pas de répondre à la question, réponds
    exactement : "Je ne sais pas." N'invente jamais de réponse partielle.
-4. Réponds en français, de façon concise et professionnelle."""
+4. Reprends les montants, taux et dates exactement comme ils sont écrits dans les
+   passages, sans les arrondir ni les reformuler.
+5. Réponds en français, de façon concise et professionnelle."""
 
 
 def build_user_prompt(question: str, passages: list[dict]) -> str:
@@ -79,9 +82,12 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
     )
     latence_ms = int((time.monotonic() - start) * 1000)
 
+    # Vérification avant démasquage : les passages et la question sont comparés dans
+    # leur forme anonymisée, celle que le LLM a réellement vue.
+    reponse, guardrail = validate_answer(response.text, passages, anonymized_question)
+
     # Démasquage : le comptable doit voir le vrai nom de son client dans la réponse.
     # La confidentialité s'applique au LLM externe, pas au cabinet lui-même.
-    reponse = response.text
     for pseudo, original in client_mapping.items():
         reponse = reponse.replace(pseudo, original)
 
@@ -96,6 +102,7 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
         "tokens_in": response.usage_metadata.prompt_token_count,
         "tokens_out": response.usage_metadata.candidates_token_count,
         "latence_ms": latence_ms,
+        "guardrail": guardrail,
     }
 
 
@@ -106,8 +113,8 @@ def log_question(question: str, result: dict, user_id: str) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO questions (texte, reponse, sources, tokens_in, tokens_out, latence_ms, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO questions (texte, reponse, sources, tokens_in, tokens_out, latence_ms, user_id, guardrail)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     question,
@@ -117,6 +124,7 @@ def log_question(question: str, result: dict, user_id: str) -> None:
                     result["tokens_out"],
                     result["latence_ms"],
                     user_id,
+                    json.dumps(result["guardrail"]) if "guardrail" in result else None,
                 ),
             )
         conn.commit()
