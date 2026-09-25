@@ -1,12 +1,16 @@
 """Point d'entrée FastAPI."""
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from datetime import date
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app import db
-from app.auth import get_current_admin_id, get_current_user_id
+from app.auth import get_current_admin_id, get_current_user_id, is_admin
+from app.calculators import wealth_tax
+from app.calculators.params import load_parameters
 from app.db import close_pool, open_pool, ping
 from app.generate import generate_answer, log_question
 
@@ -61,6 +65,27 @@ def ask_question(payload: QuestionRequest, user_id: str = Depends(get_current_us
     result = generate_answer(payload.question)
     log_question(payload.question, result, user_id)
     return result
+
+
+@app.get("/me")
+def me(user_id: str = Depends(get_current_user_id)):
+    # Sert au frontend à n'afficher le lien du tableau de bord qu'aux admins ; la
+    # vraie protection reste get_current_admin_id côté /admin/dashboard.
+    return {"is_admin": is_admin(user_id)}
+
+
+@app.post("/calculs/impot-fortune")
+def wealth_tax_calculation(
+    payload: wealth_tax.WealthTaxInput, _user_id: str = Depends(get_current_user_id)
+):
+    # Aucun appel LLM ici : les données viennent du formulaire, les taux de
+    # tax_parameters. Rien à anonymiser ni de tokens à journaliser.
+    params, sources = load_parameters(wealth_tax.CALCULATOR, date.today())
+    if any(key not in params for key in wealth_tax.REQUIRED_PARAMS):
+        raise HTTPException(status_code=503, detail="Paramètres de calcul non disponibles pour cette date")
+
+    result = wealth_tax.compute(payload, params)
+    return wealth_tax.build_response(result, payload.resident_in_tunisia, sources)
 
 
 @app.get("/questions")

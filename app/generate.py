@@ -11,7 +11,6 @@ from google.genai import types
 
 from app import db
 from app.anonymize import anonymize
-from app.calculators import try_calculation
 from app.retry import call_with_retry
 from app.search import hybrid_search
 from app.settings import get_settings
@@ -49,12 +48,6 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
     # recherche hybride elle-même appelle Gemini pour embedder la question, donc le
     # masquage doit avoir lieu avant hybrid_search, pas seulement avant la génération.
     anonymized_question, client_mapping = anonymize(question)
-
-    calculation = try_calculation(anonymized_question, model=GENERATION_MODEL)
-    if calculation is not None:
-        for pseudo, original in client_mapping.items():
-            calculation["reponse"] = calculation["reponse"].replace(pseudo, original)
-        return calculation
 
     passages = hybrid_search(anonymized_question, top_k=top_k)
 

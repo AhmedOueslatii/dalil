@@ -76,6 +76,54 @@ export type DashboardData = {
   note: string;
 };
 
+export async function fetchMe(accessToken: string): Promise<{ is_admin: boolean }> {
+  const response = await fetch(`${API_BASE}/me`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Erreur serveur (${response.status})`);
+  }
+  return response.json();
+}
+
+export type AssetCategory =
+  | "habitation_principale"
+  | "actif_professionnel"
+  | "vehicule_12cv_ou_moins"
+  | "vehicule_plus_de_12cv"
+  | "depot_bancaire_ou_postal"
+  | "autre";
+
+export type WealthTaxInput = {
+  resident_in_tunisia: boolean;
+  assets: { description: string; value_tnd: number; location: "tunisie" | "etranger"; category: AssetCategory }[];
+  deductible_debts_tnd: number;
+};
+
+export type CitedLine = { label: string; amount: string; article: string | null };
+
+export type WealthTaxResult = {
+  total: string;
+  steps: CitedLine[];
+  notes: { text: string; article: string | null }[];
+  sources: Source[];
+};
+
+export async function computeWealthTax(input: WealthTaxInput, accessToken: string): Promise<WealthTaxResult> {
+  const response = await fetch(`${API_BASE}/calculs/impot-fortune`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Erreur serveur (${response.status})`);
+  }
+  return response.json();
+}
+
 // 403 si le compte connecté n'a pas le rôle admin (voir app/auth.py get_current_admin_id).
 export async function fetchDashboard(accessToken: string): Promise<DashboardData> {
   const response = await fetch(`${API_BASE}/admin/dashboard`, {

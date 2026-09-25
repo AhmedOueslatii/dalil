@@ -1,16 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { askQuestion, fetchHistory, HistoryItem, QuestionResult } from "@/lib/api";
 import { CitedAnswer } from "@/components/CitedAnswer";
 import { useAuth } from "@/lib/supabase/AuthProvider";
-import { createClient } from "@/lib/supabase/client";
 
 export default function Home() {
-  const { user, session, loading: authLoading } = useAuth();
-  const router = useRouter();
-  const supabase = createClient();
+  const { session } = useAuth();
 
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,15 +14,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
-
-  // Page protégée : sans session, pas d'appel API possible (le backend rejetterait
-  // de toute façon avec 401/422), donc on redirige vers /login dès que l'absence
-  // de session est confirmée (authLoading évite de rediriger pendant le chargement initial).
-  useEffect(() => {
-    if (!authLoading && !session) {
-      router.push("/login");
-    }
-  }, [authLoading, session, router]);
 
   async function loadHistory() {
     if (!session) return;
@@ -65,30 +52,13 @@ export default function Home() {
     }
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/");
-  }
-
-  if (authLoading || !session) {
-    return <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">Chargement…</div>;
-  }
-
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8">
-      <header className="flex items-center justify-between rounded-xl bg-emerald-900 px-6 py-5 text-white">
-        <div>
-          <h1 className="text-xl font-semibold">Dalil</h1>
-          <p className="mt-1 text-sm text-emerald-100">
-            Assistant fiscal — réponses citées à partir des textes officiels tunisiens
-          </p>
-        </div>
-        <div className="text-right text-sm">
-          <p className="text-emerald-100">{user?.email}</p>
-          <button onClick={handleLogout} className="mt-1 text-emerald-200 underline hover:text-white">
-            Se déconnecter
-          </button>
-        </div>
+      <header className="rounded-xl bg-emerald-900 px-6 py-5 text-white">
+        <h1 className="text-xl font-semibold">Assistant fiscal</h1>
+        <p className="mt-1 text-sm text-emerald-100">
+          Réponses citées à partir des textes officiels tunisiens
+        </p>
       </header>
 
       <form onSubmit={handleSubmit} className="rounded-xl border border-neutral-200 bg-white p-5">

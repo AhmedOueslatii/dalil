@@ -35,7 +35,7 @@ async def get_current_user_id(authorization: str = Header(...)) -> str:
     return response.json()["id"]
 
 
-def get_current_admin_id(user_id: str = Depends(get_current_user_id)) -> str:
+def is_admin(user_id: str) -> bool:
     # Rôle stocké dans notre Postgres (table user_roles), pas dans Supabase Auth :
     # un utilisateur sans ligne dans user_roles est traité comme 'user' (pas admin),
     # donc l'absence de ligne est le cas par défaut sûr plutôt qu'une erreur.
@@ -43,8 +43,10 @@ def get_current_admin_id(user_id: str = Depends(get_current_user_id)) -> str:
         with conn.cursor() as cur:
             cur.execute("SELECT role FROM user_roles WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
+    return row is not None and row["role"] == "admin"
 
-    if row is None or row["role"] != "admin":
+
+def get_current_admin_id(user_id: str = Depends(get_current_user_id)) -> str:
+    if not is_admin(user_id):
         raise HTTPException(status_code=403, detail="Accès réservé aux administrateurs")
-
     return user_id

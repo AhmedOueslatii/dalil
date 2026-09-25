@@ -1,28 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { fetchDashboard, DashboardData } from "@/lib/api";
 import { useAuth } from "@/lib/supabase/AuthProvider";
 
 export default function AdminDashboard() {
-  const { session, loading: authLoading } = useAuth();
-  const router = useRouter();
+  const { session } = useAuth();
 
   const [data, setData] = useState<DashboardData | null>(null);
+  // Connecté mais sans rôle admin (403 renvoyé par l'API) : ce n'est pas un problème
+  // d'authentification, donc une page d'erreur distincte de la redirection vers /login.
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Comme /app : pas de session -> /login. Mais ici on distingue aussi le cas où
-  // l'utilisateur EST connecté mais n'a pas le rôle admin (403 renvoyé par l'API) :
-  // ce n'est pas un problème d'authentification, donc pas la même page d'erreur.
-  useEffect(() => {
-    if (!authLoading && !session) {
-      router.push("/login");
-    }
-  }, [authLoading, session, router]);
 
   useEffect(() => {
     if (!session) return;
@@ -41,10 +32,6 @@ export default function AdminDashboard() {
         setLoading(false);
       });
   }, [session]);
-
-  if (authLoading || !session) {
-    return <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">Chargement…</div>;
-  }
 
   if (forbidden) {
     return (
