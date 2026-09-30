@@ -6,9 +6,12 @@ export type Source = {
   article: string;
   document: string;
   source: string;
+  // Absent sur les réponses enregistrées avant l'ajout des citations cliquables.
+  texte?: string;
 };
 
 export type QuestionResult = {
+  id: number;
   reponse: string;
   sources: Source[];
   tokens_in: number;
@@ -72,9 +75,79 @@ export type DashboardDay = {
 
 export type DashboardData = {
   totals: DashboardTotals;
+  feedback: { positive: number; negative: number; wrong_citations: number };
   by_day: DashboardDay[];
   note: string;
 };
+
+export type Feedback = { rating: 1 | -1; wrong_citation?: boolean; comment?: string };
+
+export async function sendFeedback(questionId: number, feedback: Feedback, accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/questions/${questionId}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(feedback),
+  });
+  if (!response.ok) {
+    throw new Error(`Erreur serveur (${response.status})`);
+  }
+}
+
+export type CorpusDocument = {
+  id: number;
+  titre: string;
+  source: string;
+  date_texte: string | null;
+  chunks: number;
+  embedded: number;
+};
+
+export type CorpusState = {
+  documents: CorpusDocument[];
+  indexing: { running: boolean; last_error: string | null };
+};
+
+// Le backend renvoie un message lisible dans `detail` (doublon, PDF sans article…) :
+// on le remonte tel quel plutôt qu'un simple code HTTP.
+async function errorFrom(response: Response): Promise<Error> {
+  const body = await response.json().catch(() => null);
+  const detail = typeof body?.detail === "string" ? body.detail : `Erreur serveur (${response.status})`;
+  return new Error(detail);
+}
+
+export async function fetchCorpus(accessToken: string): Promise<CorpusState> {
+  const response = await fetch(`${API_BASE}/admin/documents`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw await errorFrom(response);
+  return response.json();
+}
+
+export async function uploadDocument(form: FormData, accessToken: string): Promise<void> {
+  // Pas de Content-Type manuel : le navigateur ajoute la frontière multipart lui-même.
+  const response = await fetch(`${API_BASE}/admin/documents`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  if (!response.ok) throw await errorFrom(response);
+}
+
+export async function reindexCorpus(accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/admin/documents/reindex`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw await errorFrom(response);
+}
+
+export async function deleteDocument(id: number, accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/admin/documents/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw await errorFrom(response);
+}
 
 export async function fetchMe(accessToken: string): Promise<{ is_admin: boolean }> {
   const response = await fetch(`${API_BASE}/me`, {

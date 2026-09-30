@@ -8,3 +8,4 @@ httpx
 pymupdf
 google-genai
 pgvector
+python-multipart

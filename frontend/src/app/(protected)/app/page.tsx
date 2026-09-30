@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { askQuestion, fetchHistory, HistoryItem, QuestionResult } from "@/lib/api";
+import { AnswerFeedback } from "@/components/AnswerFeedback";
 import { CitedAnswer } from "@/components/CitedAnswer";
 import { useAuth } from "@/lib/supabase/AuthProvider";
 
@@ -96,7 +97,7 @@ export default function Home() {
 
           {result && (
             <>
-              <CitedAnswer text={result.reponse} />
+              <CitedAnswer text={result.reponse} sources={result.sources} />
 
               {result.sources.length > 0 && (
                 <div className="mt-4 border-t border-neutral-200 pt-4">
@@ -117,6 +118,8 @@ export default function Home() {
                 Tokens : {result.tokens_in} in / {result.tokens_out} out — Latence :{" "}
                 {result.latence_ms}ms
               </p>
+
+              {session && <AnswerFeedback key={result.id} questionId={result.id} accessToken={session.access_token} />}
             </>
           )}
         </section>
@@ -138,7 +141,7 @@ export default function Home() {
             <li key={item.id} className="py-3">
               <p className="text-sm font-semibold">{item.texte}</p>
               <div className="mt-1 text-sm text-neutral-500">
-                <CitedAnswer text={item.reponse} />
+                <CitedAnswer text={item.reponse} sources={item.sources} />
               </div>
               <p className="mt-1 text-xs text-neutral-400">
                 {new Date(item.created_at).toLocaleString("fr-FR")}

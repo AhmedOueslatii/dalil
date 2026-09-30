@@ -30,7 +30,9 @@ export function Navbar() {
     router.push("/");
   }
 
-  const links = isAdmin ? [...LINKS, { href: "/admin", label: "Tableau de bord" }] : LINKS;
+  const links = isAdmin
+    ? [...LINKS, { href: "/admin", label: "Tableau de bord" }, { href: "/admin/corpus", label: "Corpus" }]
+    : LINKS;
 
   return (
     <nav className="border-b border-neutral-200 bg-white">

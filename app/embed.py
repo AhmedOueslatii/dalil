@@ -5,10 +5,10 @@ Calcule l'embedding de tous les chunks dont embedding est encore NULL.
 """
 import math
 
-from google import genai
 from google.genai import types
 
 from app import db
+from app.llm import get_client
 from app.retry import call_with_retry
 from app.settings import get_settings
 
@@ -24,9 +24,9 @@ def normalize(vector: list[float]) -> list[float]:
     return [v / norm for v in vector]
 
 
-def embed_texts(client: genai.Client, texts: list[str], dim: int) -> list[list[float]]:
+def embed_texts(texts: list[str], dim: int) -> list[list[float]]:
     result = call_with_retry(
-        client.models.embed_content,
+        get_client().models.embed_content,
         model=EMBEDDING_MODEL,
         contents=texts,
         config=types.EmbedContentConfig(output_dimensionality=dim),
@@ -36,7 +36,6 @@ def embed_texts(client: genai.Client, texts: list[str], dim: int) -> list[list[f
 
 def embed_missing_chunks(batch_size: int = 20) -> int:
     settings = get_settings()
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     total_embedded = 0
     with db.pool.connection() as conn:
@@ -52,7 +51,7 @@ def embed_missing_chunks(batch_size: int = 20) -> int:
                 break
 
             texts = [row["texte"] for row in rows]
-            vectors = embed_texts(client, texts, settings.EMBEDDING_DIM)
+            vectors = embed_texts(texts, settings.EMBEDDING_DIM)
 
             with conn.cursor() as cur:
                 for row, vector in zip(rows, vectors):

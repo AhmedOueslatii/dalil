@@ -6,15 +6,14 @@ Usage : python -m app.generate "quel est le montant des recettes du budget de l'
 import argparse
 import time
 
-from google import genai
 from google.genai import types
 
 from app import db
 from app.anonymize import anonymize
 from app.guardrails import validate_answer
+from app.llm import get_client
 from app.retry import call_with_retry
 from app.search import hybrid_search
-from app.settings import get_settings
 
 
 # gemini-3.6-flash a un quota free tier de 20 requêtes/jour, épuisé pendant les tests.
@@ -65,14 +64,11 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
             "latence_ms": 0,
         }
 
-    settings = get_settings()
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
     user_prompt = build_user_prompt(anonymized_question, passages)
 
     start = time.monotonic()
     response = call_with_retry(
-        client.models.generate_content,
+        get_client().models.generate_content,
         model=GENERATION_MODEL,
         contents=user_prompt,
         config=types.GenerateContentConfig(
@@ -91,8 +87,10 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
     for pseudo, original in client_mapping.items():
         reponse = reponse.replace(pseudo, original)
 
+    # Le texte du passage accompagne chaque source pour que le comptable vérifie la
+    # citation en un clic.
     sources = [
-        {"article": p["article"], "document": p["titre"], "source": p["source"]}
+        {"article": p["article"], "document": p["titre"], "source": p["source"], "texte": p["texte"]}
         for p in passages
     ]
 
@@ -106,7 +104,8 @@ def generate_answer(question: str, top_k: int = 5) -> dict:
     }
 
 
-def log_question(question: str, result: dict, user_id: str) -> None:
+def log_question(question: str, result: dict, user_id: str) -> int:
+    """Journalise la question et renvoie son id (nécessaire pour le retour utilisateur)."""
     import json
 
     with db.pool.connection() as conn:
@@ -115,6 +114,7 @@ def log_question(question: str, result: dict, user_id: str) -> None:
                 """
                 INSERT INTO questions (texte, reponse, sources, tokens_in, tokens_out, latence_ms, user_id, guardrail)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 (
                     question,
@@ -127,7 +127,9 @@ def log_question(question: str, result: dict, user_id: str) -> None:
                     json.dumps(result["guardrail"]) if "guardrail" in result else None,
                 ),
             )
+            question_id = cur.fetchone()["id"]
         conn.commit()
+    return question_id
 
 
 def main():

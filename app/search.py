@@ -4,12 +4,12 @@ Usage : python -m app.search "quel est le montant des recettes du budget de l'Et
 """
 import argparse
 
-from google import genai
 from google.genai import types
 from pgvector import Vector
 
 from app import db
 from app.embed import EMBEDDING_MODEL, normalize
+from app.llm import get_client
 from app.retry import call_with_retry
 from app.settings import get_settings
 
@@ -22,9 +22,8 @@ RRF_K = 60  # constante standard de la littérature RRF, amortit le poids des to
 
 def embed_query(query: str) -> list[float]:
     settings = get_settings()
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
     result = call_with_retry(
-        client.models.embed_content,
+        get_client().models.embed_content,
         model=EMBEDDING_MODEL,
         contents=query,
         config=types.EmbedContentConfig(output_dimensionality=settings.EMBEDDING_DIM),

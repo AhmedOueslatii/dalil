@@ -71,6 +71,12 @@ export default function AdminDashboard() {
 
           <p className="text-xs text-neutral-400">{data.note}</p>
 
+          <section className="grid grid-cols-3 gap-4">
+            <StatCard label="👍 Utiles" value={data.feedback.positive.toLocaleString("fr-FR")} />
+            <StatCard label="👎 Pas utiles" value={data.feedback.negative.toLocaleString("fr-FR")} />
+            <StatCard label="Citations signalées" value={data.feedback.wrong_citations.toLocaleString("fr-FR")} />
+          </section>
+
           <section className="rounded-xl border border-neutral-200 bg-white p-5">
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
               30 derniers jours

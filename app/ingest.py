@@ -61,6 +61,10 @@ def split_long_chunk(texte: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
 def ingest_pdf(pdf_path: Path, titre: str, source: str, date_texte: str | None, langue: str = "fr") -> int:
     full_text = extract_text(pdf_path)
     articles = split_into_articles(full_text)
+    # Refus avant toute écriture : un PDF scanné (sans texte) ou sans marqueurs
+    # « Art. X » créerait sinon un document vide, invisible pour la recherche.
+    if not articles:
+        raise ValueError("Aucun article détecté dans ce PDF (texte absent ou sans marqueurs « Art. X »).")
 
     with db.pool.connection() as conn:
         with conn.cursor() as cur:
