@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_ANON_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
+    # Modèle de l'agent (app/agent). Vérifier qu'il existe avec client.models.list()
+    # avant de le changer : les noms Gemini expirent vite sur les comptes récents.
+    AGENT_MODEL: str = "gemini-flash-lite-latest"
 
 
 @lru_cache

@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app import corpus, db
+from app.agent.loop import run_agent
+from app.agent.store import log_agent_run
 from app.auth import get_current_admin_id, get_current_user_id, is_admin
 from app.calculators import wealth_tax
 from app.calculators.params import load_parameters
@@ -70,6 +72,30 @@ def ask_question(payload: QuestionRequest, user_id: str = Depends(get_current_us
     # synchrones dans un threadpool, donc ça ne bloque pas l'event loop principal.
     result = generate_answer(payload.question)
     result["id"] = log_question(payload.question, result, user_id)
+    return result
+
+
+class AgentResponse(BaseModel):
+    id: int
+    reponse: str
+    statut: Literal["reponse", "precisions_requises", "budget_epuise", "erreur"]
+    precisions: list[str]
+    sources: list[dict]
+    appels_llm: int
+    tokens_in: int
+    tokens_out: int
+    latence_ms: int
+
+
+@app.post("/agent", response_model=AgentResponse)
+def ask_agent(payload: QuestionRequest, user_id: str = Depends(get_current_user_id)):
+    # Même logique que /questions (route synchrone → threadpool). La trace complète
+    # reste en base (agent_runs) : elle contient les arguments d'outils, inutile au client.
+    result = run_agent(payload.question)
+    result["id"] = log_agent_run(payload.question, result, user_id)
+    if result["statut"] == "erreur":
+        # Journalisé d'abord (tokens déjà consommés), puis signalé comme panne au client.
+        raise HTTPException(status_code=503, detail=result["reponse"])
     return result
 
 
@@ -170,7 +196,11 @@ def admin_dashboard(_admin_id: str = Depends(get_current_admin_id)):
                     coalesce(sum(tokens_in), 0) AS total_tokens_in,
                     coalesce(sum(tokens_out), 0) AS total_tokens_out,
                     coalesce(avg(latence_ms), 0) AS avg_latence_ms
-                FROM questions
+                FROM (
+                    SELECT tokens_in, tokens_out, latence_ms FROM questions
+                    UNION ALL
+                    SELECT tokens_in, tokens_out, latence_ms FROM agent_runs
+                ) AS runs
                 """
             )
             totals = cur.fetchone()
@@ -193,7 +223,11 @@ def admin_dashboard(_admin_id: str = Depends(get_current_admin_id)):
                     count(*) AS questions,
                     coalesce(sum(tokens_in), 0) AS tokens_in,
                     coalesce(sum(tokens_out), 0) AS tokens_out
-                FROM questions
+                FROM (
+                    SELECT tokens_in, tokens_out, created_at FROM questions
+                    UNION ALL
+                    SELECT tokens_in, tokens_out, created_at FROM agent_runs
+                ) AS runs
                 WHERE created_at >= now() - interval '30 days'
                 GROUP BY day
                 ORDER BY day
