@@ -9,8 +9,10 @@ Chaque outil renvoie deux choses :
 Un outil ne lève pas d'exception vers la boucle pour une erreur d'argument : il renvoie
 {"erreur": ...} afin que le modèle corrige son appel au tour suivant.
 """
+import re
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from typing import Callable
 
 from pydantic import ValidationError
@@ -18,6 +20,7 @@ from pydantic import ValidationError
 from app.agent.llm import ToolSpec
 from app.calculators import wealth_tax
 from app.calculators.params import load_parameters
+from app.guardrails import NUMBER_PATTERN, normalize_number
 from app.search import hybrid_search
 
 ASK_USER_TOOL = "demander_precisions"
@@ -32,14 +35,19 @@ class ToolOutput:
 @dataclass
 class Tool:
     spec: ToolSpec
-    handler: Callable[[dict], ToolOutput]
+    # (arguments du modèle, question anonymisée) → résultat. La question sert aux outils
+    # qui doivent vérifier que le modèle n'invente pas leurs données d'entrée.
+    handler: Callable[[dict, str], ToolOutput]
 
 
-def search_texts(args: dict) -> ToolOutput:
+def search_texts(args: dict, question: str) -> ToolOutput:
     query = str(args.get("requete", "")).strip()
     if not query:
         return ToolOutput({"erreur": "Le paramètre « requete » est vide."})
-    top_k = max(1, min(int(args.get("nombre", 5)), 8))
+    try:
+        top_k = max(1, min(int(args.get("nombre") or 5), 8))
+    except (TypeError, ValueError):
+        return ToolOutput({"erreur": "« nombre » doit être un entier entre 1 et 8."})
 
     passages = hybrid_search(query, top_k=top_k)
     if not passages:
@@ -50,11 +58,34 @@ def search_texts(args: dict) -> ToolOutput:
     )
 
 
-def compute_wealth_tax(args: dict) -> ToolOutput:
+# « 6 MTND », « 2,5 millions », « 500 mille » : montants écrits avec un multiplicateur.
+SCALED_AMOUNT = re.compile(rf"({NUMBER_PATTERN.pattern})\s*(milliards?|millions?|mille|mtnd|mdt|md|m)\b", re.IGNORECASE)
+SCALES = {"milliard": 10**9, "million": 10**6, "mille": 10**3, "mtnd": 10**6, "mdt": 10**6, "md": 10**6, "m": 10**6}
+
+
+def amounts_in(text: str) -> set[Decimal]:
+    amounts = {Decimal(normalize_number(n)) for n in NUMBER_PATTERN.findall(text)}
+    for number, unit in SCALED_AMOUNT.findall(text):
+        amounts.add(Decimal(normalize_number(number)) * SCALES[unit.lower().rstrip("s")])
+    return amounts
+
+
+def compute_wealth_tax(args: dict, question: str) -> ToolOutput:
     try:
         payload = wealth_tax.WealthTaxInput.model_validate(args)
     except ValidationError as exc:
         return ToolOutput({"erreur": f"Données invalides : {exc.errors(include_url=False)}"})
+
+    # Le détail du calcul devient un passage citable : sans ce contrôle, une valeur
+    # inventée par le modèle passerait le garde-fou avec une citation [Art. 88].
+    allowed = amounts_in(question)
+    values = [a.value_tnd for a in payload.assets] + [payload.deductible_debts_tnd]
+    invented = sorted({str(v) for v in values if v and Decimal(str(v)) not in allowed})
+    if invented:
+        return ToolOutput({"erreur": (
+            f"Montant(s) absent(s) de la question : {', '.join(invented)}. N'invente aucune "
+            "valeur : appelle demander_precisions pour l'obtenir du comptable."
+        )})
 
     params, sources = load_parameters(wealth_tax.CALCULATOR, date.today())
     if any(key not in params for key in wealth_tax.REQUIRED_PARAMS):
@@ -147,6 +178,6 @@ DEFAULT_TOOLS = [
             },
         ),
         # Jamais exécuté : la boucle intercepte cet outil pour s'arrêter et rendre la main.
-        lambda args: ToolOutput({}),
+        lambda args, question: ToolOutput({}),
     ),
 ]

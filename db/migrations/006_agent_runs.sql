@@ -7,7 +7,7 @@ CREATE TABLE agent_runs (
     user_id UUID NOT NULL,
     question TEXT NOT NULL,
     reponse TEXT NOT NULL,
-    -- reponse | precisions_requises | budget_epuise
+    -- reponse | precisions_requises | budget_epuise | erreur
     statut TEXT NOT NULL,
     sources JSONB NOT NULL DEFAULT '[]',
     trace JSONB NOT NULL DEFAULT '[]',

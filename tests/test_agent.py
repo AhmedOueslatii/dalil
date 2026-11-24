@@ -1,7 +1,9 @@
 """Tests de la boucle de l'agent avec un LLM scripté : aucun appel réseau ni base."""
+from decimal import Decimal
+
 from app.agent.llm import AssistantTurn, ToolCall, ToolResult, ToolResults, ToolSpec, UserMessage, to_gemini_contents
 from app.agent.loop import MAX_LLM_CALLS, run_agent
-from app.agent.tools import ASK_USER_TOOL, Tool, ToolOutput
+from app.agent.tools import ASK_USER_TOOL, Tool, ToolOutput, amounts_in, compute_wealth_tax, search_texts
 from app.guardrails import DONT_KNOW
 
 ART_88 = {
@@ -28,14 +30,14 @@ class ScriptedLLM:
         return AssistantTurn(text="", tool_calls=[ToolCall("rechercher_textes", {"requete": f"q{len(self.received)}"})], tokens_in=10)
 
 
-def fake_search(args):
+def fake_search(args, question):
     return ToolOutput({"passages": [ART_88]}, passages=[ART_88])
 
 
 def tools(search=fake_search):
     spec = ToolSpec("rechercher_textes", "recherche", {"type": "object", "properties": {"requete": {"type": "string"}}})
     ask = ToolSpec(ASK_USER_TOOL, "précisions", {"type": "object", "properties": {}})
-    return [Tool(spec, search), Tool(ask, lambda a: ToolOutput({}))]
+    return [Tool(spec, search), Tool(ask, lambda a, q: ToolOutput({}))]
 
 
 def call(name="rechercher_textes", **args):
@@ -90,7 +92,7 @@ def test_budget_stops_a_looping_model():
 
 
 def test_tool_error_is_returned_to_model_not_raised():
-    def broken_search(args):
+    def broken_search(args, question):
         raise RuntimeError("base indisponible")
 
     llm = ScriptedLLM([call(requete="fortune"), answer(DONT_KNOW)])
@@ -106,9 +108,9 @@ def test_tool_error_is_returned_to_model_not_raised():
 def test_identical_call_is_not_executed_twice():
     calls = []
 
-    def counting_search(args):
+    def counting_search(args, question):
         calls.append(args)
-        return fake_search(args)
+        return fake_search(args, question)
 
     llm = ScriptedLLM([call(requete="fortune"), call(requete="fortune"), answer(DONT_KNOW)])
     run_agent("Taux ?", adapter=llm, tools=tools(counting_search))
@@ -138,3 +140,87 @@ def test_gemini_conversion_pairs_calls_and_results():
     assert [c.role for c in contents] == ["user", "model", "user"]
     assert contents[1].parts[0].function_call.id == "c1"
     assert contents[2].parts[0].function_response.id == "c1"
+
+
+def test_llm_failure_keeps_partial_cost_for_logging():
+    class FailingLLM(ScriptedLLM):
+        def complete(self, system, messages, tools):
+            if self.received:
+                raise TimeoutError("Gemini ne répond pas")
+            return super().complete(system, messages, tools)
+
+    result = run_agent("Taux ?", adapter=FailingLLM([call(requete="fortune")]), tools=tools())
+
+    assert result["statut"] == "erreur"
+    assert result["appels_llm"] == 1
+    assert result["tokens_in"] == 100
+    assert result["trace"][-1]["type"] == "erreur"
+
+
+def test_failed_call_can_be_retried_identically():
+    attempts = []
+
+    def flaky_search(args, question):
+        attempts.append(args)
+        if len(attempts) == 1:
+            raise TimeoutError("embedding")
+        return fake_search(args, question)
+
+    llm = ScriptedLLM([call(requete="fortune"), call(requete="fortune"), answer(DONT_KNOW)])
+    run_agent("Taux ?", adapter=llm, tools=tools(flaky_search))
+
+    assert len(attempts) == 2
+
+
+def test_malformed_clarifications_go_back_to_model():
+    llm = ScriptedLLM([
+        call(ASK_USER_TOOL, questions="Résidence fiscale ?"),
+        call(ASK_USER_TOOL, questions=["Le client est-il résident ?"]),
+    ])
+    result = run_agent("Combien d'impôt sur la fortune ?", adapter=llm, tools=tools())
+
+    assert "erreur" in llm.received[1][-1].results[0].content
+    assert result["statut"] == "precisions_requises"
+    assert result["precisions"] == ["Le client est-il résident ?"]
+
+
+def test_clarification_with_invented_number_is_rejected():
+    llm = ScriptedLLM([
+        call(ASK_USER_TOOL, questions=["Le seuil étant de 2 millions, le dépasse-t-il ?"]),
+        call(ASK_USER_TOOL, questions=["Quelle est la valeur du patrimoine ?"]),
+    ])
+    result = run_agent("Combien d'impôt sur la fortune ?", adapter=llm, tools=tools())
+
+    assert "2" in llm.received[1][-1].results[0].content["erreur"]
+    assert result["precisions"] == ["Quelle est la valeur du patrimoine ?"]
+
+
+def test_tools_of_the_last_allowed_turn_are_not_executed():
+    calls = []
+
+    def counting_search(args, question):
+        calls.append(args)
+        return fake_search(args, question)
+
+    run_agent("Taux ?", adapter=ScriptedLLM([]), tools=tools(counting_search))
+
+    assert len(calls) == MAX_LLM_CALLS - 1
+
+
+def test_calculator_rejects_amounts_absent_from_question():
+    args = {"resident_in_tunisia": True, "assets": [{"value_tnd": 4_000_000, "location": "tunisie", "category": "autre"}]}
+    output = compute_wealth_tax(args, "Mon client a une villa locative, combien d'impôt sur la fortune ?")
+
+    assert "4000000" in output.content["erreur"]
+    assert output.passages == []
+
+
+def test_amounts_in_understands_written_multipliers():
+    amounts = amounts_in("Immeubles de 6 MTND, terrain de 2,5 millions, dettes 500 000 dinars, 3 mois")
+
+    assert {Decimal(6_000_000), Decimal(2_500_000), Decimal(500_000)} <= amounts
+    assert Decimal(3_000_000) not in amounts
+
+
+def test_search_rejects_non_numeric_count():
+    assert "erreur" in search_texts({"requete": "fortune", "nombre": "beaucoup"}, "").content

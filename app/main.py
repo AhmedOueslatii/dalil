@@ -78,7 +78,7 @@ def ask_question(payload: QuestionRequest, user_id: str = Depends(get_current_us
 class AgentResponse(BaseModel):
     id: int
     reponse: str
-    statut: Literal["reponse", "precisions_requises", "budget_epuise"]
+    statut: Literal["reponse", "precisions_requises", "budget_epuise", "erreur"]
     precisions: list[str]
     sources: list[dict]
     appels_llm: int
@@ -93,6 +93,9 @@ def ask_agent(payload: QuestionRequest, user_id: str = Depends(get_current_user_
     # reste en base (agent_runs) : elle contient les arguments d'outils, inutile au client.
     result = run_agent(payload.question)
     result["id"] = log_agent_run(payload.question, result, user_id)
+    if result["statut"] == "erreur":
+        # Journalisé d'abord (tokens déjà consommés), puis signalé comme panne au client.
+        raise HTTPException(status_code=503, detail=result["reponse"])
     return result
 
 
@@ -193,7 +196,11 @@ def admin_dashboard(_admin_id: str = Depends(get_current_admin_id)):
                     coalesce(sum(tokens_in), 0) AS total_tokens_in,
                     coalesce(sum(tokens_out), 0) AS total_tokens_out,
                     coalesce(avg(latence_ms), 0) AS avg_latence_ms
-                FROM questions
+                FROM (
+                    SELECT tokens_in, tokens_out, latence_ms FROM questions
+                    UNION ALL
+                    SELECT tokens_in, tokens_out, latence_ms FROM agent_runs
+                ) AS runs
                 """
             )
             totals = cur.fetchone()
@@ -216,7 +223,11 @@ def admin_dashboard(_admin_id: str = Depends(get_current_admin_id)):
                     count(*) AS questions,
                     coalesce(sum(tokens_in), 0) AS tokens_in,
                     coalesce(sum(tokens_out), 0) AS tokens_out
-                FROM questions
+                FROM (
+                    SELECT tokens_in, tokens_out, created_at FROM questions
+                    UNION ALL
+                    SELECT tokens_in, tokens_out, created_at FROM agent_runs
+                ) AS runs
                 WHERE created_at >= now() - interval '30 days'
                 GROUP BY day
                 ORDER BY day
