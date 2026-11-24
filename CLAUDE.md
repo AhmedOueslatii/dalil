@@ -53,3 +53,20 @@ mais fausses.
 
 Ne pas anticiper les étapes futures : à chaque étape, on construit uniquement ce qui est
 nécessaire à cette étape.
+
+## Agent fiscal (`app/agent/`)
+
+Boucle LLM + outils écrite à la main, au-dessus du RAG : `llm.py` (types neutres +
+adaptateur Gemini), `tools.py` (outils), `loop.py` (boucle, budget, garde-fou),
+`store.py` (table `agent_runs`, migration 006), route `POST /agent`, CLI
+`python -m app.agent "question" --trace`.
+
+- Les 4 règles non négociables s'appliquent à l'agent : la réponse finale passe par
+  `validate_answer` contre tous les passages renvoyés par les outils ; la question est
+  anonymisée avant le premier appel ; chaque exécution journalise tokens, latence et trace.
+- Un outil ne lève pas d'exception vers la boucle : il renvoie `{"erreur": ...}` pour que
+  le modèle corrige son appel.
+- Un outil de calcul doit renvoyer son détail comme passage citable sous l'article qui le
+  fonde : c'est ce qui autorise ses montants à passer le garde-fou.
+- Changer de fournisseur LLM = écrire un nouvel adaptateur dans `llm.py`, sans toucher à
+  la boucle ni aux outils.
